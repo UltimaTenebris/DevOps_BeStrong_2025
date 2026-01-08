@@ -1,0 +1,86 @@
+name: $(Date:yyyyMMdd)$(Rev:.r)
+
+# Trigger the pipeline on changes to the main branch
+trigger:
+  branches:
+    include:
+      - main
+
+# Trigger the pipeline on Pull Requests targeting main
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  # Configuration
+  tf_version: '1.5.0'
+  service_connection_name: 'sc-bestrong-azure'  # The name from Phase 1
+  rg_name: 'rg-bestrong-state'                  # Where your TF State lives
+  storage_account_name: 'stbestrongstate'       # Your existing backend storage
+  container_name: 'tfstate'
+  key_name: 'prod.terraform.tfstate'
+
+pool:
+  vmImage: 'ubuntu-latest' # Use 'Default' if using Self-Hosted agent
+
+steps:
+# 1. Install Terraform
+- task: TerraformInstaller@0
+  displayName: 'Install Terraform'
+  inputs:
+    terraformVersion: '$(tf_version)'
+
+# 2. Terraform Init & Validate (Runs on both PR and Main)
+- task: AzureCLI@2
+  displayName: 'Terraform Init & Validate'
+  inputs:
+    azureSubscription: '$(service_connection_name)'
+    addSpnToEnvironment: true
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      # Log setup
+      echo "Initializing Terraform..."
+      
+      # We need the Storage Account Key to access the backend. 
+      # We fetch it dynamically using the Service Connection credentials.
+      ACCOUNT_KEY=$(az storage account keys list --resource-group $(rg_name) --account-name $(storage_account_name) --query '[0].value' -o tsv)
+
+      terraform init \
+        -backend-config="resource_group_name=$(rg_name)" \
+        -backend-config="storage_account_name=$(storage_account_name)" \
+        -backend-config="container_name=$(container_name)" \
+        -backend-config="key=$(key_name)" \
+        -backend-config="access_key=$ACCOUNT_KEY"
+
+      terraform validate
+
+# 3. Terraform Plan (Runs on both, but crucial for PR)
+- task: AzureCLI@2
+  displayName: 'Terraform Plan'
+  inputs:
+    azureSubscription: '$(service_connection_name)'
+    addSpnToEnvironment: true
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Running Terraform Plan..."
+      
+      # Run Plan and output to a binary file
+      # Note: We pass the SQL Password via environment variable set in ADO (See Phase 3)
+      terraform plan -out=tfplan -input=false -var="sql_admin_password=$(SQL_ADMIN_PASSWORD)"
+
+# 4. Terraform Apply (ONLY runs on Main branch, never on PR)
+- task: AzureCLI@2
+  displayName: 'Terraform Apply'
+  # Condition: Succeeded AND Branch is Main AND Not a PR
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne(variables['Build.Reason'], 'PullRequest'))
+  inputs:
+    azureSubscription: '$(service_connection_name)'
+    addSpnToEnvironment: true
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Running Terraform Apply..."
+      terraform apply -input=false -auto-approve tfplan
