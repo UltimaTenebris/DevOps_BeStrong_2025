@@ -6,9 +6,7 @@ trigger:
       - main
 
 pool:
-  vmImage: 'ubuntu-latest'
-  # or local laptop agent
-  # name: 'Default'
+  name: 'Default'
 
 steps:
 # 1. Install Terraform
