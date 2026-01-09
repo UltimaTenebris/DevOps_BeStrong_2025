@@ -7,12 +7,12 @@ terraform {
     }
   }
   # Note: Ensure your backend block is correct here if you are using one
-  backend "azurerm" {
-    resource_group_name  = "rg-bestrong-state"
-    storage_account_name = "stbestrongstate"
-    container_name       = "tfstate"
-    key                  = "prod.terraform.tfstate"
-  }
+  #backend "azurerm" {
+  #  resource_group_name  = "rg-bestrong-state"
+  #  storage_account_name = "stbestrongstate"
+  #  container_name       = "tfstate"
+  #  key                  = "prod.terraform.tfstate"
+ # }
 }
 
 provider "azurerm" {
